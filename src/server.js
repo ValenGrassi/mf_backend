@@ -20,8 +20,10 @@ const upload = multer({
 const app = express()
 
 const PORT = process.env.PORT || 5000
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "https://mf-logistica.netlify.app/"
+
+const FRONTEND_URL = (
+  process.env.FRONTEND_URL || "https://mf-logistica.netlify.app"
+).replace(/\/+$/, "")
 
 app.use(
   cors({
