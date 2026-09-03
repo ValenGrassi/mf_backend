@@ -22,7 +22,7 @@ const COVER_PATH = path.join(
   __dirname,
   "..",
   "assets",
-  "cover.jpg"
+  "fondo.jpg"
 )
 
 const ACCENT = "#972527"
