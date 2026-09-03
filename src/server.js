@@ -590,7 +590,7 @@ app.get(
 
       res.setHeader(
         "Content-Disposition",
-        'attachment; filename="lista-de-precios-mf-logistica.pdf"'
+        'attachment; filename="MFLogistica-Lista-de-Precios.pdf"'
       )
 
       const doc = buildPriceListPdf({
