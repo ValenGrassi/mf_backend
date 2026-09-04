@@ -56,13 +56,29 @@ function drawCoverPage(doc, { phone }) {
   })
 
   const logoSize = 130
+  const logoX = pageWidth / 2 - logoSize / 2
+  const logoY = imgHeight - logoSize / 2
 
-  doc.image(
-    LOGO_PATH,
-    pageWidth / 2 - logoSize / 2,
-    imgHeight - logoSize / 2,
-    { width: logoSize, height: logoSize }
-  )
+  // El archivo del logo tiene el fondo blanco "quemado" en el
+  // propio PNG (no es transparente), así que sin recorte se ve
+  // como un cuadrado blanco. Se recorta a un círculo para que solo
+  // se dibuje el isologo redondo.
+  doc.save()
+
+  doc
+    .circle(
+      logoX + logoSize / 2,
+      logoY + logoSize / 2,
+      (logoSize / 2) * 0.97
+    )
+    .clip()
+
+  doc.image(LOGO_PATH, logoX, logoY, {
+    width: logoSize,
+    height: logoSize,
+  })
+
+  doc.restore()
 
   let y = imgHeight + logoSize / 2 + 26
 
