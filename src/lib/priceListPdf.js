@@ -5,6 +5,7 @@ import {
   drawWhatsappIcon,
   drawCalendarIcon,
   drawClockIcon,
+  drawWarningIcon,
 } from "./pdfIcons.js"
 
 const __dirname = path.dirname(
@@ -159,7 +160,15 @@ function drawCoverPage(doc, { phone }) {
   infoIconRow({
     drawIcon: drawCalendarIcon,
     iconColor: MUTED,
-    text: "Lunes a Sábados — Pedidos hasta las 22 hs",
+    text: "Pedidos hasta las 22 hs",
+  })
+
+  infoIconRow({
+    drawIcon: drawWarningIcon,
+    iconColor: ACCENT,
+    text: "Precios vigentes hasta las 21:59 hs",
+    font: "Helvetica-Bold",
+    textColor: ACCENT,
   })
 
   infoIconRow({

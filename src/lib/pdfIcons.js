@@ -49,3 +49,24 @@ export function drawClockIcon(doc, x, y, size, color) {
 
   doc.restore()
 }
+
+const WARNING_TRIANGLE_PATH =
+  "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
+
+export function drawWarningIcon(doc, x, y, size, color) {
+  doc.save()
+  doc.translate(x, y)
+  doc.scale(size / 24)
+
+  doc
+    .lineCap("round")
+    .lineJoin("round")
+    .lineWidth(2)
+    .strokeColor(color)
+
+  doc.path(WARNING_TRIANGLE_PATH).stroke()
+  doc.moveTo(12, 9).lineTo(12, 13).stroke()
+  doc.moveTo(12, 17).lineTo(12, 17.01).stroke()
+
+  doc.restore()
+}

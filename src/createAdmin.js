@@ -3,15 +3,15 @@ import prisma from "./lib/prisma.js";
 
 const createAdmin = async () => {
   const hashedPassword = await bcrypt.hash(
-    "Martin9876",
+    "Eli9876",
     10
   );
 
   await prisma.user.create({
     data: {
-      username: "Martin",
+      username: "Eli",
       password: hashedPassword,
-      phone: "11 6412-9259",
+      phone: "11 5468-9220",
     },
   });
 
