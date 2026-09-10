@@ -45,6 +45,90 @@ function formatDate(date) {
   })
 }
 
+// Dibuja 3 ítems ícono+texto con el del medio centrado EXACTO en el
+// centro de la página, y los otros dos a los costados, con
+// separadores verticales. Cada ítem puede tener varias líneas.
+// Devuelve la "y" al final de la fila.
+function drawCenteredInfoRow(
+  doc,
+  y,
+  pageWidth,
+  { left, middle, right }
+) {
+  const iconGap = 6
+  const dividerPad = 14
+
+  function measure(it) {
+    doc.font(it.font).fontSize(it.fontSize)
+    const lineHeight = doc.currentLineHeight()
+    const textWidth = Math.max(
+      ...it.lines.map((l) => doc.widthOfString(l))
+    )
+    return {
+      ...it,
+      lineHeight,
+      textWidth,
+      blockHeight: it.lines.length * lineHeight,
+      width: it.iconSize + iconGap + textWidth,
+    }
+  }
+
+  const L = measure(left)
+  const M = measure(middle)
+  const R = measure(right)
+
+  const rowHeight = Math.max(
+    L.blockHeight,
+    M.blockHeight,
+    R.blockHeight,
+    L.iconSize,
+    M.iconSize,
+    R.iconSize
+  )
+
+  function drawItem(it, xStart) {
+    const iconY = y + (rowHeight - it.iconSize) / 2
+    it.drawIcon(doc, xStart, iconY, it.iconSize, it.iconColor)
+
+    doc
+      .font(it.font)
+      .fontSize(it.fontSize)
+      .fillColor(it.textColor)
+
+    const textX = xStart + it.iconSize + iconGap
+    const textStartY =
+      y + (rowHeight - it.blockHeight) / 2
+
+    it.lines.forEach((line, i) => {
+      doc.text(line, textX, textStartY + i * it.lineHeight, {
+        lineBreak: false,
+      })
+    })
+  }
+
+  function drawDivider(x) {
+    doc
+      .strokeColor(BORDER)
+      .lineWidth(1)
+      .moveTo(x, y + (rowHeight - 15) / 2)
+      .lineTo(x, y + (rowHeight + 15) / 2)
+      .stroke()
+  }
+
+  const mStartX = pageWidth / 2 - M.width / 2
+  drawItem(M, mStartX)
+
+  const leftDividerX = mStartX - dividerPad
+  drawDivider(leftDividerX)
+  drawItem(L, leftDividerX - dividerPad - L.width)
+
+  const rightDividerX = mStartX + M.width + dividerPad
+  drawDivider(rightDividerX)
+  drawItem(R, rightDividerX + dividerPad)
+
+  return y + rowHeight
+}
+
 // Dibuja varios ícono+texto en una sola línea horizontal, centrados
 // como bloque, con separadores verticales entre ellos.
 // Devuelve la "y" al final de la fila.
@@ -156,8 +240,8 @@ function drawHeader(doc, { phone }) {
 
   doc
     .font("Helvetica")
-    .fontSize(10.5)
-    .fillColor(MUTED)
+    .fontSize(12)
+    .fillColor(INK)
     .text(
       "MF Logística — Distribución para gastronomía oriental",
       0,
@@ -165,7 +249,7 @@ function drawHeader(doc, { phone }) {
       { align: "center", width: pageWidth }
     )
 
-  y += 24
+  y += 26
 
   doc
     .strokeColor(ACCENT)
@@ -176,36 +260,36 @@ function drawHeader(doc, { phone }) {
 
   y += 22
 
-  // Fila 1: teléfono | pedidos | precios vigentes
-  y = drawInlineInfoRow(doc, y, pageWidth, [
-    {
+  // Fila 1: teléfono | pedidos (centrado exacto) | precios vigentes
+  y = drawCenteredInfoRow(doc, y, pageWidth, {
+    left: {
       drawIcon: drawWhatsappIcon,
-      iconColor: "#25D366",
+      iconColor: ACCENT,
       iconSize: 15,
-      text: phone || "Contactanos",
+      lines: [phone || "Contactanos"],
       font: "Helvetica-Bold",
       fontSize: 10.5,
       textColor: INK,
     },
-    {
+    middle: {
       drawIcon: drawCalendarIcon,
-      iconColor: MUTED,
+      iconColor: ACCENT,
       iconSize: 14,
-      text: "Pedidos hasta las 22 hs",
+      lines: ["Pedidos hasta las 22 hs"],
       font: "Helvetica",
       fontSize: 9.5,
       textColor: MUTED,
     },
-    {
+    right: {
       drawIcon: drawWarningIcon,
       iconColor: ACCENT,
       iconSize: 14,
-      text: "Precios vigentes hasta las 21:59 hs",
+      lines: ["Precios vigentes", "hasta las 21:59 hs"],
       font: "Helvetica-Bold",
       fontSize: 9.5,
       textColor: ACCENT,
     },
-  ])
+  })
 
   y += 8
 
@@ -213,7 +297,7 @@ function drawHeader(doc, { phone }) {
   y = drawInlineInfoRow(doc, y, pageWidth, [
     {
       drawIcon: drawClockIcon,
-      iconColor: MUTED,
+      iconColor: ACCENT,
       iconSize: 13,
       text: `Generado el ${formatDate(new Date())}`,
       font: "Helvetica",
@@ -496,7 +580,9 @@ export function buildPriceListPdf({
     const label = `${i + 1} de ${total}`
     const isFirstPage = i === 0
 
-    doc.font("Times-Italic").fontSize(isFirstPage ? 11 : 10)
+    doc
+      .font("Times-Bold")
+      .fontSize(isFirstPage ? 11 : 10.5)
     const labelWidth = doc.widthOfString(label)
 
     if (isFirstPage) {
@@ -527,7 +613,7 @@ export function buildPriceListPdf({
         )
     } else {
       doc
-        .fillColor(MUTED)
+        .fillColor(INK)
         .text(label, MARGIN, 24, { lineBreak: false })
     }
 
