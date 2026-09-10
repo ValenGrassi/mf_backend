@@ -45,27 +45,89 @@ function formatDate(date) {
   })
 }
 
-function drawCoverPage(doc, { phone }) {
-  const pageWidth = doc.page.width
-  const pageHeight = doc.page.height
+// Dibuja varios ícono+texto en una sola línea horizontal, centrados
+// como bloque, con separadores verticales entre ellos.
+// Devuelve la "y" al final de la fila.
+function drawInlineInfoRow(doc, y, pageWidth, items) {
+  const iconGap = 6
+  const dividerPad = 13
 
-  const imgHeight = Math.round(pageHeight * 0.4)
+  const measured = items.map((it) => {
+    doc.font(it.font).fontSize(it.fontSize)
+    const textWidth = doc.widthOfString(it.text)
+    return {
+      ...it,
+      textWidth,
+      blockWidth: it.iconSize + iconGap + textWidth,
+    }
+  })
+
+  let maxLineHeight = 0
+  measured.forEach((m) => {
+    doc.font(m.font).fontSize(m.fontSize)
+    maxLineHeight = Math.max(
+      maxLineHeight,
+      doc.currentLineHeight()
+    )
+  })
+
+  const totalWidth =
+    measured.reduce((sum, m) => sum + m.blockWidth, 0) +
+    (measured.length - 1) * (dividerPad * 2 + 1)
+
+  let x = (pageWidth - totalWidth) / 2
+
+  measured.forEach((m, index) => {
+    doc.font(m.font).fontSize(m.fontSize)
+    const lineHeight = doc.currentLineHeight()
+    const textY = y + (maxLineHeight - lineHeight) / 2
+    const iconY = y + (maxLineHeight - m.iconSize) / 2
+
+    m.drawIcon(doc, x, iconY, m.iconSize, m.iconColor)
+
+    doc
+      .font(m.font)
+      .fontSize(m.fontSize)
+      .fillColor(m.textColor)
+      .text(m.text, x + m.iconSize + iconGap, textY, {
+        lineBreak: false,
+      })
+
+    x += m.blockWidth
+
+    if (index < measured.length - 1) {
+      x += dividerPad
+      doc
+        .strokeColor(BORDER)
+        .lineWidth(1)
+        .moveTo(x, y + (maxLineHeight - 13) / 2)
+        .lineTo(x, y + (maxLineHeight + 13) / 2)
+        .stroke()
+      x += dividerPad + 1
+    }
+  })
+
+  return y + maxLineHeight
+}
+
+function drawHeader(doc, { phone }) {
+  const pageWidth = doc.page.width
+
+  const imgHeight = 228
 
   doc.image(COVER_PATH, 0, 0, {
     width: pageWidth,
     height: imgHeight,
   })
 
-  const logoSize = 130
+  const logoSize = 112
   const logoX = pageWidth / 2 - logoSize / 2
   const logoY = imgHeight - logoSize / 2
 
   // El archivo del logo tiene el fondo blanco "quemado" en el
-  // propio PNG (no es transparente), así que sin recorte se ve
-  // como un cuadrado blanco. Se recorta a un círculo para que solo
-  // se dibuje el isologo redondo.
+  // propio PNG (no es transparente): se recorta a un círculo para
+  // que solo se dibuje el isologo redondo.
   doc.save()
-
   doc
     .circle(
       logoX + logoSize / 2,
@@ -73,30 +135,28 @@ function drawCoverPage(doc, { phone }) {
       (logoSize / 2) * 0.97
     )
     .clip()
-
   doc.image(LOGO_PATH, logoX, logoY, {
     width: logoSize,
     height: logoSize,
   })
-
   doc.restore()
 
-  let y = imgHeight + logoSize / 2 + 26
+  let y = imgHeight + logoSize / 2 + 16
 
   doc
     .font("Times-Bold")
-    .fontSize(30)
+    .fontSize(28)
     .fillColor(ACCENT)
     .text("LISTA DE PRECIOS", 0, y, {
       align: "center",
       width: pageWidth,
     })
 
-  y += 44
+  y += 38
 
   doc
     .font("Helvetica")
-    .fontSize(11)
+    .fontSize(10.5)
     .fillColor(MUTED)
     .text(
       "MF Logística — Distribución para gastronomía oriental",
@@ -105,88 +165,65 @@ function drawCoverPage(doc, { phone }) {
       { align: "center", width: pageWidth }
     )
 
-  y += 34
+  y += 24
 
   doc
     .strokeColor(ACCENT)
     .lineWidth(2)
-    .moveTo(pageWidth / 2 - 45, y)
-    .lineTo(pageWidth / 2 + 45, y)
+    .moveTo(pageWidth / 2 - 40, y)
+    .lineTo(pageWidth / 2 + 40, y)
     .stroke()
 
-  y += 36
+  y += 22
 
-  function infoIconRow({
-    drawIcon,
-    iconColor,
-    iconSize = 17,
-    text,
-    font = "Helvetica",
-    fontSize = 11,
-    textColor = MUTED,
-    gap = 9,
-  }) {
-    doc.font(font).fontSize(fontSize)
+  // Fila 1: teléfono | pedidos | precios vigentes
+  y = drawInlineInfoRow(doc, y, pageWidth, [
+    {
+      drawIcon: drawWhatsappIcon,
+      iconColor: "#25D366",
+      iconSize: 15,
+      text: phone || "Contactanos",
+      font: "Helvetica-Bold",
+      fontSize: 10.5,
+      textColor: INK,
+    },
+    {
+      drawIcon: drawCalendarIcon,
+      iconColor: MUTED,
+      iconSize: 14,
+      text: "Pedidos hasta las 22 hs",
+      font: "Helvetica",
+      fontSize: 9.5,
+      textColor: MUTED,
+    },
+    {
+      drawIcon: drawWarningIcon,
+      iconColor: ACCENT,
+      iconSize: 14,
+      text: "Precios vigentes hasta las 21:59 hs",
+      font: "Helvetica-Bold",
+      fontSize: 9.5,
+      textColor: ACCENT,
+    },
+  ])
 
-    const textWidth = doc.widthOfString(text)
-    const totalWidth = iconSize + gap + textWidth
-    const startX = (pageWidth - totalWidth) / 2
-    const lineHeight = doc.currentLineHeight()
-    const iconY = y + (lineHeight - iconSize) / 2
+  y += 8
 
-    drawIcon(doc, startX, iconY, iconSize, iconColor)
+  // Fila 2: fecha de generación
+  y = drawInlineInfoRow(doc, y, pageWidth, [
+    {
+      drawIcon: drawClockIcon,
+      iconColor: MUTED,
+      iconSize: 13,
+      text: `Generado el ${formatDate(new Date())}`,
+      font: "Helvetica",
+      fontSize: 9,
+      textColor: MUTED,
+    },
+  ])
 
-    doc
-      .font(font)
-      .fontSize(fontSize)
-      .fillColor(textColor)
-      .text(text, startX + iconSize + gap, y, {
-        lineBreak: false,
-      })
-
-    y += lineHeight + 20
-  }
-
-  infoIconRow({
-    drawIcon: drawWhatsappIcon,
-    iconColor: "#25D366",
-    iconSize: 18,
-    text: phone || "Contactanos para más información",
-    font: "Helvetica-Bold",
-    fontSize: 12,
-    textColor: INK,
-  })
-
-  infoIconRow({
-    drawIcon: drawCalendarIcon,
-    iconColor: MUTED,
-    text: "Pedidos hasta las 22 hs",
-  })
-
-  infoIconRow({
-    drawIcon: drawWarningIcon,
-    iconColor: ACCENT,
-    text: "Precios vigentes hasta las 21:59 hs",
-    font: "Helvetica-Bold",
-    textColor: ACCENT,
-  })
-
-  infoIconRow({
-    drawIcon: drawClockIcon,
-    iconColor: MUTED,
-    text: `Generado el ${formatDate(new Date())}`,
-  })
-
-  doc
-    .font("Helvetica-Oblique")
-    .fontSize(9)
-    .fillColor(MUTED)
-    .text(
-      "Los precios pueden variar sin previo aviso. Consultá disponibilidad y condiciones mayoristas.",
-      70,
-      pageHeight - 70,
-      { align: "center", width: pageWidth - 140 }
-    )
+  doc.x = MARGIN
+  doc.y = y + 22
 }
 
 function truncateToLines(
@@ -232,23 +269,49 @@ function ensureSpace(doc, needed) {
   return false
 }
 
-function drawCategoryHeader(doc, name, suffix = "") {
-  ensureSpace(doc, 40)
+function drawCategoryHeader(doc, name) {
+  ensureSpace(doc, 46)
 
-  const contentWidth =
-    doc.page.width - MARGIN * 2
+  const contentWidth = doc.page.width - MARGIN * 2
+  const label = name.toUpperCase()
+
+  const fontSize = 12
+  doc.font("Times-Bold").fontSize(fontSize)
+  const textWidth = doc.widthOfString(label)
+
+  const padX = 15
+  const bannerHeight = 22
+  const tailLength = 13
+  const bannerWidth = textWidth + padX * 2
+  const bx = MARGIN
+  const by = doc.y
+  const r = 3
+
+  // Banner rojo con forma de cinta (borde izquierdo redondeado,
+  // punta a la derecha) para acercarse al "molde".
+  doc
+    .moveTo(bx + r, by)
+    .lineTo(bx + bannerWidth, by)
+    .lineTo(bx + bannerWidth + tailLength, by + bannerHeight / 2)
+    .lineTo(bx + bannerWidth, by + bannerHeight)
+    .lineTo(bx + r, by + bannerHeight)
+    .quadraticCurveTo(bx, by + bannerHeight, bx, by + bannerHeight - r)
+    .lineTo(bx, by + r)
+    .quadraticCurveTo(bx, by, bx + r, by)
+    .fill(ACCENT)
 
   doc
-    .font("Helvetica-Bold")
-    .fontSize(14)
-    .fillColor(ACCENT)
+    .font("Times-Bold")
+    .fontSize(fontSize)
+    .fillColor("#f7f2e9")
     .text(
-      `${name.toUpperCase()}${suffix}`,
-      MARGIN,
-      doc.y
+      label,
+      bx + padX,
+      by + (bannerHeight - doc.currentLineHeight()) / 2 + 1,
+      { lineBreak: false }
     )
 
-  doc.moveDown(0.25)
+  doc.y = by + bannerHeight + 6
 
   doc
     .strokeColor(BORDER)
@@ -257,7 +320,7 @@ function drawCategoryHeader(doc, name, suffix = "") {
     .lineTo(MARGIN + contentWidth, doc.y)
     .stroke()
 
-  doc.moveDown(0.7)
+  doc.y += 8
 }
 
 function drawProductRow(doc, product) {
@@ -400,9 +463,9 @@ export function buildPriceListPdf({
     bufferPages: true,
   })
 
-  drawCoverPage(doc, { phone })
-
-  doc.addPage({ margin: MARGIN })
+  // El encabezado y los productos van en la misma página: no hay
+  // página de portada aparte.
+  drawHeader(doc, { phone })
 
   const visibleCategories = categories.filter(
     (category) => category.products.length > 0
@@ -420,32 +483,55 @@ export function buildPriceListPdf({
     }
   })
 
+  // Número de hoja arriba a la izquierda en todas las páginas.
   const range = doc.bufferedPageRange()
+  const total = range.count
 
-  for (let i = range.start + 1; i < range.start + range.count; i++) {
-    doc.switchToPage(i)
+  for (let i = 0; i < total; i++) {
+    doc.switchToPage(range.start + i)
 
-    // El footer vive dentro del margen inferior de la página:
-    // se pone el margen en 0 momentáneamente para que pdfkit no
-    // interprete que "no entra" y agregue una página nueva.
-    const bottomMargin = doc.page.margins.bottom
-    doc.page.margins.bottom = 0
+    const savedTopMargin = doc.page.margins.top
+    doc.page.margins.top = 0
 
-    doc
-      .font("Helvetica")
-      .fontSize(8)
-      .fillColor(MUTED)
-      .text(
-        `MF Logística · Página ${i} de ${range.count - 1}`,
-        MARGIN,
-        doc.page.height - 30,
-        {
-          width: doc.page.width - MARGIN * 2,
-          align: "center",
-        }
-      )
+    const label = `${i + 1} de ${total}`
+    const isFirstPage = i === 0
 
-    doc.page.margins.bottom = bottomMargin
+    doc.font("Times-Italic").fontSize(isFirstPage ? 11 : 10)
+    const labelWidth = doc.widthOfString(label)
+
+    if (isFirstPage) {
+      // Sobre la foto: pastilla oscura semitransparente para que
+      // el texto claro se lea siempre.
+      const pillPadX = 8
+      const pillHeight = 18
+
+      doc.fillOpacity(0.45)
+      doc
+        .roundedRect(
+          MARGIN - 6,
+          16,
+          labelWidth + pillPadX * 2,
+          pillHeight,
+          4
+        )
+        .fill("#1f1f1f")
+      doc.fillOpacity(1)
+
+      doc
+        .fillColor("#f7f2e9")
+        .text(
+          label,
+          MARGIN - 6 + pillPadX,
+          16 + (pillHeight - doc.currentLineHeight()) / 2,
+          { lineBreak: false }
+        )
+    } else {
+      doc
+        .fillColor(MUTED)
+        .text(label, MARGIN, 24, { lineBreak: false })
+    }
+
+    doc.page.margins.top = savedTopMargin
   }
 
   doc.end()
