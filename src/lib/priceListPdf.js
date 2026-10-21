@@ -346,7 +346,8 @@ function ensureSpace(doc, needed) {
   const bottom = doc.page.height - MARGIN
 
   if (doc.y + needed > bottom) {
-    doc.addPage({ margin: MARGIN })
+    // Sin "size" explícito PDFKit usa Carta (más ancha que A4).
+    doc.addPage({ size: "A4", margin: MARGIN })
     return true
   }
 
