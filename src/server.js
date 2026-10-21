@@ -136,6 +136,47 @@ async function categoryExists(categoryId) {
   return !!category
 }
 
+const PRODUCT_ORDER = [
+  { category: { sortOrder: "asc" } },
+  { sortOrder: "asc" },
+  { name: "asc" },
+]
+
+const CATEGORY_ORDER = [
+  { sortOrder: "asc" },
+  { name: "asc" },
+]
+
+// Los elementos nuevos (o los productos que cambian de categoría)
+// van al final, para no desarmar el orden que el admin ya armó.
+async function nextProductSortOrder(categoryId) {
+  const result = await prisma.product.aggregate({
+    where: { categoryId },
+    _max: { sortOrder: true },
+  })
+
+  return (result._max.sortOrder ?? -1) + 1
+}
+
+async function nextCategorySortOrder() {
+  const result = await prisma.category.aggregate({
+    _max: { sortOrder: true },
+  })
+
+  return (result._max.sortOrder ?? -1) + 1
+}
+
+function isIdList(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (id) => typeof id === "string" && id.trim()
+    ) &&
+    new Set(value).size === value.length
+  )
+}
+
 function extractStoragePath(imageUrl) {
   if (!imageUrl || typeof imageUrl !== "string") {
     return null
@@ -555,15 +596,14 @@ app.get(
               where: {
                 status: "publicado",
               },
-              orderBy: {
-                name: "asc",
-              },
+              orderBy: [
+                { sortOrder: "asc" },
+                { name: "asc" },
+              ],
             },
           },
 
-          orderBy: {
-            name: "asc",
-          },
+          orderBy: CATEGORY_ORDER,
         })
 
       const adminUsername =
@@ -615,6 +655,105 @@ app.get(
 )
 
 // =========================================================
+// ORDEN DE PRODUCTOS Y CATEGORÍAS
+// PROTEGIDO
+// Van antes de las rutas con /:id para que "reorder" no se
+// interprete como un id.
+// =========================================================
+
+app.put(
+  "/api/products/reorder",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { categoryId, ids } = req.body
+
+      if (typeof categoryId !== "string" || !isIdList(ids)) {
+        return res.status(400).json({
+          error: "Datos de orden inválidos",
+        })
+      }
+
+      const matching = await prisma.product.count({
+        where: {
+          id: { in: ids },
+          categoryId,
+        },
+      })
+
+      if (matching !== ids.length) {
+        return res.status(400).json({
+          error:
+            "Algunos productos no pertenecen a esa categoría",
+        })
+      }
+
+      await prisma.$transaction(
+        ids.map((id, index) =>
+          prisma.product.update({
+            where: { id },
+            data: { sortOrder: index },
+          })
+        )
+      )
+
+      res.json({ success: true })
+    } catch (error) {
+      console.error("PUT /api/products/reorder:", error)
+
+      res.status(500).json({
+        error: "No se pudo guardar el orden de los productos",
+      })
+    }
+  }
+)
+
+app.put(
+  "/api/categories/reorder",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { ids } = req.body
+
+      if (!isIdList(ids)) {
+        return res.status(400).json({
+          error: "Datos de orden inválidos",
+        })
+      }
+
+      const matching = await prisma.category.count({
+        where: {
+          id: { in: ids },
+        },
+      })
+
+      if (matching !== ids.length) {
+        return res.status(400).json({
+          error: "Algunas categorías no existen",
+        })
+      }
+
+      await prisma.$transaction(
+        ids.map((id, index) =>
+          prisma.category.update({
+            where: { id },
+            data: { sortOrder: index },
+          })
+        )
+      )
+
+      res.json({ success: true })
+    } catch (error) {
+      console.error("PUT /api/categories/reorder:", error)
+
+      res.status(500).json({
+        error: "No se pudo guardar el orden de las categorías",
+      })
+    }
+  }
+)
+
+// =========================================================
 // PRODUCTS - GET PÚBLICOS
 // =========================================================
 
@@ -633,11 +772,7 @@ app.get("/api/products", async (req, res) => {
         category: true,
       },
 
-      orderBy: [
-        {
-          name: "asc",
-        },
-      ],
+      orderBy: PRODUCT_ORDER,
     })
 
     res.json(products.map(formatProduct))
@@ -750,6 +885,8 @@ app.post(
               : "publicado",
 
           categoryId,
+
+          sortOrder: await nextProductSortOrder(categoryId),
         },
 
         include: {
@@ -861,6 +998,13 @@ app.put(
               : "publicado",
 
           categoryId,
+
+          ...(categoryId !== existingProduct.categoryId
+            ? {
+                sortOrder:
+                  await nextProductSortOrder(categoryId),
+              }
+            : {}),
         },
 
         include: {
@@ -1028,6 +1172,11 @@ app.patch(
         }
 
         data.categoryId = categoryId
+
+        if (categoryId !== existingProduct.categoryId) {
+          data.sortOrder =
+            await nextProductSortOrder(categoryId)
+        }
       }
 
       if (Object.keys(data).length === 0) {
@@ -1202,9 +1351,7 @@ app.get("/api/categories", async (req, res) => {
           },
         },
 
-        orderBy: {
-          name: "asc",
-        },
+        orderBy: CATEGORY_ORDER,
       })
 
     res.json(
@@ -1291,6 +1438,8 @@ app.post(
               status === "oculto"
                 ? "oculto"
                 : "publicado",
+
+            sortOrder: await nextCategorySortOrder(),
           },
         })
 

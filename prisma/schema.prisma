@@ -23,6 +23,7 @@ model Category {
   slug        String        @unique
   description String?
   status      ProductStatus @default(publicado)
+  sortOrder   Int           @default(0)
 
   products    Product[]
 
@@ -39,6 +40,7 @@ model Product {
   unit        String
   image       String?
   status      ProductStatus @default(publicado)
+  sortOrder   Int           @default(0)
 
   categoryId  String
   category    Category      @relation(fields: [categoryId], references: [id])
