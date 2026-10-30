@@ -177,6 +177,158 @@ function isIdList(value) {
   )
 }
 
+const PROMOTION_ORDER = [
+  { sortOrder: "asc" },
+  { createdAt: "asc" },
+]
+
+function isBlank(value) {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && !value.trim())
+  )
+}
+
+function validatePromotionData({
+  title,
+  price,
+  regularPrice,
+  validUntil,
+}) {
+  const errors = {}
+
+  if (typeof title !== "string" || !title.trim()) {
+    errors.title = "El título es obligatorio"
+  }
+
+  if (
+    isBlank(price) ||
+    Number.isNaN(Number(price)) ||
+    Number(price) < 0
+  ) {
+    errors.price = "Precio inválido"
+  }
+
+  if (
+    !isBlank(regularPrice) &&
+    (Number.isNaN(Number(regularPrice)) ||
+      Number(regularPrice) <= 0)
+  ) {
+    errors.regularPrice = "Precio anterior inválido"
+  }
+
+  if (
+    !isBlank(validUntil) &&
+    (typeof validUntil !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(validUntil) ||
+      Number.isNaN(
+        new Date(`${validUntil}T00:00:00Z`).getTime()
+      ))
+  ) {
+    errors.validUntil = "Fecha inválida"
+  }
+
+  return errors
+}
+
+function buildPromotionData(body) {
+  const {
+    title,
+    description,
+    image,
+    price,
+    regularPrice,
+    validUntil,
+    status,
+  } = body
+
+  return {
+    title: title.trim(),
+    description: isBlank(description)
+      ? null
+      : description.trim(),
+    image: isBlank(image) ? null : image.trim(),
+    price: Number(price),
+    regularPrice: isBlank(regularPrice)
+      ? null
+      : Number(regularPrice),
+    validUntil: isBlank(validUntil)
+      ? null
+      : new Date(`${validUntil}T00:00:00Z`),
+    status: status === "oculto" ? "oculto" : "publicado",
+  }
+}
+
+function formatPromotion(promotion) {
+  return {
+    id: promotion.id,
+    title: promotion.title,
+    description: promotion.description ?? "",
+    image: promotion.image ?? "",
+    price: Number(promotion.price),
+    regularPrice:
+      promotion.regularPrice === null
+        ? null
+        : Number(promotion.regularPrice),
+    validUntil: promotion.validUntil
+      ? promotion.validUntil.toISOString().slice(0, 10)
+      : null,
+    status: promotion.status,
+    createdAt: promotion.createdAt,
+    updatedAt: promotion.updatedAt,
+  }
+}
+
+// Una fecha vencida no oculta la promo (eso lo decide solo el estado):
+// la promo sigue publicada y simplemente deja de mostrar la fecha.
+// "Válido hasta" incluye ese día completo en hora argentina, sin
+// importar en qué zona horaria corra el servidor.
+function visibleValidUntil(validUntil) {
+  if (!validUntil) return null
+
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(new Date())
+
+  return validUntil >= new Date(`${today}T00:00:00Z`)
+    ? validUntil
+    : null
+}
+
+// PDFKit no lee WebP (formato en el que se guardan las imágenes
+// subidas), así que se pasan a JPG. Si una imagen falla, la promo
+// sale igual con un recuadro gris en lugar de cortar todo el PDF.
+async function loadImageForPdf(url) {
+  if (!url) return null
+
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+    })
+
+    if (!response.ok) return null
+
+    const buffer = Buffer.from(
+      await response.arrayBuffer()
+    )
+
+    return await sharp(buffer)
+      .resize(300, 300, { fit: "cover" })
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 85 })
+      .toBuffer()
+  } catch (error) {
+    console.error(
+      "No se pudo cargar la imagen de la promoción:",
+      url,
+      error.message
+    )
+
+    return null
+  }
+}
+
 function extractStoragePath(imageUrl) {
   if (!imageUrl || typeof imageUrl !== "string") {
     return null
@@ -606,6 +758,38 @@ app.get(
           orderBy: CATEGORY_ORDER,
         })
 
+      // Las promociones son un agregado: si fallan, el PDF sale igual
+      // sin esa sección en vez de no salir.
+      let promotions = []
+
+      try {
+        const publishedPromotions =
+          await prisma.promotion.findMany({
+            where: { status: "publicado" },
+            orderBy: PROMOTION_ORDER,
+          })
+
+        promotions = await Promise.all(
+          publishedPromotions.map(async (promotion) => ({
+            title: promotion.title,
+            description: promotion.description,
+            price: promotion.price,
+            regularPrice: promotion.regularPrice,
+            validUntil: visibleValidUntil(
+              promotion.validUntil
+            ),
+            imageBuffer: await loadImageForPdf(
+              promotion.image
+            ),
+          }))
+        )
+      } catch (error) {
+        console.error(
+          "No se pudieron cargar las promociones para el PDF:",
+          error
+        )
+      }
+
       const adminUsername =
         typeof req.query.admin === "string"
           ? req.query.admin
@@ -636,6 +820,7 @@ app.get(
       const doc = buildPriceListPdf({
         categories,
         phone: owner?.phone ?? null,
+        promotions,
       })
 
       doc.pipe(res)
@@ -1649,6 +1834,211 @@ app.delete(
       res.status(500).json({
         error:
           "No se pudo eliminar la categoría",
+      })
+    }
+  }
+)
+
+// =========================================================
+// PROMOTIONS
+// GET PÚBLICO: solo las publicadas (sin fechas vencidas), o todas
+// tal cual con ?all=true (panel)
+// =========================================================
+
+app.get("/api/promotions", async (req, res) => {
+  try {
+    const showAll = req.query.all === "true"
+
+    const promotions = await prisma.promotion.findMany({
+      where: showAll ? {} : { status: "publicado" },
+      orderBy: PROMOTION_ORDER,
+    })
+
+    res.json(
+      promotions.map((promotion) =>
+        formatPromotion(
+          showAll
+            ? promotion
+            : {
+                ...promotion,
+                validUntil: visibleValidUntil(
+                  promotion.validUntil
+                ),
+              }
+        )
+      )
+    )
+  } catch (error) {
+    console.error("GET /api/promotions:", error)
+
+    res.status(500).json({
+      error: "No se pudieron obtener las promociones",
+    })
+  }
+})
+
+app.put(
+  "/api/promotions/reorder",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { ids } = req.body
+
+      if (!isIdList(ids)) {
+        return res.status(400).json({
+          error: "Datos de orden inválidos",
+        })
+      }
+
+      const matching = await prisma.promotion.count({
+        where: {
+          id: { in: ids },
+        },
+      })
+
+      if (matching !== ids.length) {
+        return res.status(400).json({
+          error: "Algunas promociones no existen",
+        })
+      }
+
+      await prisma.$transaction(
+        ids.map((id, index) =>
+          prisma.promotion.update({
+            where: { id },
+            data: { sortOrder: index },
+          })
+        )
+      )
+
+      res.json({ success: true })
+    } catch (error) {
+      console.error("PUT /api/promotions/reorder:", error)
+
+      res.status(500).json({
+        error:
+          "No se pudo guardar el orden de las promociones",
+      })
+    }
+  }
+)
+
+app.post(
+  "/api/promotions",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const errors = validatePromotionData(req.body)
+
+      if (Object.keys(errors).length > 0) {
+        return res.status(400).json({
+          error: Object.values(errors)[0],
+          fields: errors,
+        })
+      }
+
+      const maxOrder = await prisma.promotion.aggregate({
+        _max: { sortOrder: true },
+      })
+
+      const promotion = await prisma.promotion.create({
+        data: {
+          ...buildPromotionData(req.body),
+          sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
+        },
+      })
+
+      res.status(201).json(formatPromotion(promotion))
+    } catch (error) {
+      console.error("POST /api/promotions:", error)
+
+      res.status(500).json({
+        error: "No se pudo crear la promoción",
+      })
+    }
+  }
+)
+
+app.put(
+  "/api/promotions/:id",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const id = req.params.id
+
+      const existing = await prisma.promotion.findUnique({
+        where: { id },
+      })
+
+      if (!existing) {
+        return res.status(404).json({
+          error: "Promoción no encontrada",
+        })
+      }
+
+      const errors = validatePromotionData(req.body)
+
+      if (Object.keys(errors).length > 0) {
+        return res.status(400).json({
+          error: Object.values(errors)[0],
+          fields: errors,
+        })
+      }
+
+      const promotion = await prisma.promotion.update({
+        where: { id },
+        data: buildPromotionData(req.body),
+      })
+
+      if (
+        existing.image &&
+        existing.image !== promotion.image
+      ) {
+        await deleteProductImage(existing.image)
+      }
+
+      res.json(formatPromotion(promotion))
+    } catch (error) {
+      console.error("PUT /api/promotions/:id:", error)
+
+      res.status(500).json({
+        error: "No se pudo actualizar la promoción",
+      })
+    }
+  }
+)
+
+app.delete(
+  "/api/promotions/:id",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const id = req.params.id
+
+      const existing = await prisma.promotion.findUnique({
+        where: { id },
+      })
+
+      if (!existing) {
+        return res.status(404).json({
+          error: "Promoción no encontrada",
+        })
+      }
+
+      await prisma.promotion.delete({
+        where: { id },
+      })
+
+      if (existing.image) {
+        await deleteProductImage(existing.image)
+      }
+
+      res.json({ success: true, id })
+    } catch (error) {
+      console.error("DELETE /api/promotions/:id:", error)
+
+      res.status(500).json({
+        error: "No se pudo eliminar la promoción",
       })
     }
   }

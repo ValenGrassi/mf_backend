@@ -30,6 +30,7 @@ const ACCENT = "#972527"
 const INK = "#1f1f1f"
 const MUTED = "#7a7a7a"
 const BORDER = "#e5e0dc"
+const CARD_BG = "#faf6f1"
 
 const MARGIN = 50
 
@@ -317,8 +318,9 @@ function truncateToLines(
 ) {
   doc.font(font).fontSize(fontSize)
 
+  // heightOfString cuenta el interlineado, así que hay que medir igual.
   const maxHeight =
-    doc.currentLineHeight() * maxLines + 1
+    doc.currentLineHeight(true) * maxLines + 1
 
   if (doc.heightOfString(text, { width }) <= maxHeight) {
     return text
@@ -406,6 +408,172 @@ function drawCategoryHeader(doc, name) {
     .stroke()
 
   doc.y += 8
+}
+
+function discountLabel(price, regularPrice) {
+  if (!regularPrice || Number(regularPrice) <= Number(price)) {
+    return null
+  }
+
+  const percent = Math.round(
+    (1 - Number(price) / Number(regularPrice)) * 100
+  )
+
+  return percent > 0 ? `-${percent}%` : null
+}
+
+// imageBuffer tiene que venir ya en JPG/PNG: PDFKit no soporta WebP,
+// que es el formato en el que se guardan las imágenes subidas.
+function drawPromotionCard(doc, promo, x, y, width, height) {
+  const pad = 10
+  const imgSize = height - pad * 2
+
+  doc.roundedRect(x, y, width, height, 6).fill(CARD_BG)
+  doc
+    .roundedRect(x, y, width, height, 6)
+    .lineWidth(1)
+    .strokeColor(BORDER)
+    .stroke()
+
+  doc.save()
+  doc.roundedRect(x + pad, y + pad, imgSize, imgSize, 4).clip()
+
+  if (promo.imageBuffer) {
+    doc.image(promo.imageBuffer, x + pad, y + pad, {
+      cover: [imgSize, imgSize],
+      align: "center",
+      valign: "center",
+    })
+  } else {
+    doc.rect(x + pad, y + pad, imgSize, imgSize).fill("#ece6df")
+  }
+
+  doc.restore()
+
+  const badge = discountLabel(promo.price, promo.regularPrice)
+
+  if (badge) {
+    doc.font("Helvetica-Bold").fontSize(8.5)
+    const badgeWidth = doc.widthOfString(badge) + 10
+
+    doc
+      .roundedRect(x + pad + 4, y + pad + 4, badgeWidth, 14, 7)
+      .fill(ACCENT)
+    doc
+      .fillColor("#ffffff")
+      .text(badge, x + pad + 9, y + pad + 7.5, {
+        lineBreak: false,
+      })
+  }
+
+  const textX = x + pad + imgSize + 10
+  const textWidth = x + width - pad - textX
+  let textY = y + pad
+
+  const title = truncateToLines(doc, promo.title, {
+    font: "Helvetica-Bold",
+    fontSize: 10.5,
+    width: textWidth,
+    maxLines: 2,
+  })
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(10.5)
+    .fillColor(INK)
+    .text(title, textX, textY, { width: textWidth })
+
+  textY += doc.heightOfString(title, { width: textWidth }) + 2
+
+  if (promo.description) {
+    const description = truncateToLines(doc, promo.description, {
+      font: "Helvetica",
+      fontSize: 8,
+      width: textWidth,
+      maxLines: 2,
+    })
+
+    doc
+      .font("Helvetica")
+      .fontSize(8)
+      .fillColor(MUTED)
+      .text(description, textX, textY, { width: textWidth })
+  }
+
+  const priceY = y + height - pad - 15
+
+  if (promo.validUntil) {
+    // Es una fecha sin hora guardada a las 00:00 UTC: si se formatea
+    // en hora argentina mostraría el día anterior.
+    const until = new Date(promo.validUntil).toLocaleDateString(
+      "es-AR",
+      { day: "2-digit", month: "2-digit", timeZone: "UTC" }
+    )
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(7.5)
+      .fillColor(ACCENT)
+      .text(`Válido hasta el ${until}`, textX, priceY - 12, {
+        lineBreak: false,
+      })
+  }
+
+  const priceText = formatPrice(promo.price)
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(14)
+    .fillColor(ACCENT)
+    .text(priceText, textX, priceY, { lineBreak: false })
+
+  if (badge) {
+    const priceWidth = doc.widthOfString(priceText)
+    const regularText = formatPrice(promo.regularPrice)
+    const regularX = textX + priceWidth + 8
+    const regularY = priceY + 4.5
+
+    doc.font("Helvetica").fontSize(8.5).fillColor(MUTED)
+    const regularWidth = doc.widthOfString(regularText)
+
+    doc.text(regularText, regularX, regularY, { lineBreak: false })
+    doc
+      .strokeColor(MUTED)
+      .lineWidth(0.8)
+      .moveTo(regularX, regularY + 4)
+      .lineTo(regularX + regularWidth, regularY + 4)
+      .stroke()
+  }
+}
+
+function drawPromotionsSection(doc, promotions) {
+  drawCategoryHeader(doc, "Promociones")
+
+  const contentWidth = doc.page.width - MARGIN * 2
+  const gap = 14
+  const cardWidth = (contentWidth - gap) / 2
+  const cardHeight = 100
+
+  for (let i = 0; i < promotions.length; i += 2) {
+    ensureSpace(doc, cardHeight)
+
+    const y = doc.y
+
+    promotions.slice(i, i + 2).forEach((promo, column) => {
+      drawPromotionCard(
+        doc,
+        promo,
+        MARGIN + column * (cardWidth + gap),
+        y,
+        cardWidth,
+        cardHeight
+      )
+    })
+
+    doc.y = y + cardHeight + 12
+  }
+
+  doc.x = MARGIN
 }
 
 function drawProductRow(doc, product) {
@@ -541,6 +709,7 @@ function drawProductRow(doc, product) {
 export function buildPriceListPdf({
   categories,
   phone,
+  promotions = [],
 }) {
   const doc = new PDFDocument({
     size: "A4",
@@ -551,6 +720,11 @@ export function buildPriceListPdf({
   // El encabezado y los productos van en la misma página: no hay
   // página de portada aparte.
   drawHeader(doc, { phone })
+
+  if (promotions.length > 0) {
+    drawPromotionsSection(doc, promotions)
+    doc.moveDown(1)
+  }
 
   const visibleCategories = categories.filter(
     (category) => category.products.length > 0
